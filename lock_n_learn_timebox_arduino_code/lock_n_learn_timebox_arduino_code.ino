@@ -1,8 +1,10 @@
 /*
  * Timer Box Code
- * Version: 2.12
+ * Version: 2.2
  * Created: 241209
  * Author: ChatGPT
+ *  * Prompt Engineer: X3msnake
+ * Repo: https://github.com/X3msnake/lockandlearn-timer-box
  * 
  * Features:
  * - Two 7-segment displays to show remaining time (in minutes).
@@ -17,6 +19,12 @@
 #include <Wire.h>
 #include <RTClib.h>
 #include <Servo.h>
+#include <EEPROM.h>
+
+// EEPROM config
+const int lockStateAddress = 0;   // EEPROM address for storing lock state (0 = unlocked, 1 = locked)
+const int remainingTimeAddress = 1; // EEPROM address for storing remaining time (in minutes)
+const int lockTimeAddress = 2; // EEPROM address to store the lock time (timestamp)
 
 // Pin Configuration
 const byte segmentPins[7] = {3, 4, 5, 6, 7, 8, 9}; // A-G segments
@@ -26,7 +34,7 @@ const byte switchPin = 13;                         // Lid switch
 const byte servoPin = 12;                          // Servo motor
 
 // Constants and Variables
-const int defaultLockTime = 15;                    // Default lock time in minutes
+const int defaultLockTime = 1;                     // Default lock time in minutes
 int lockTime = defaultLockTime;                    // Current lock time
 int remainingTime = 0;                             // Time left in minutes
 bool boxLocked = false;                            // Box lock state
@@ -75,15 +83,48 @@ void setup() {
 
   // Initialize servo
   lockServo.attach(servoPin);
-  unlockBox();
+  
+  // Restore lock state and remaining time from EEPROM
+  boxLocked = EEPROM.read(lockStateAddress);  // 0 = unlocked, 1 = locked
+  remainingTime = EEPROM.read(remainingTimeAddress);
+
+  // If the box was locked previously, initialize the lock
+
+  if (boxLocked) {
+    // Load the stored lock time from EEPROM
+    long savedLockTimestamp = 0;
+    savedLockTimestamp |= EEPROM.read(lockTimeAddress);
+    savedLockTimestamp |= (long)EEPROM.read(lockTimeAddress + 1) << 8;
+    savedLockTimestamp |= (long)EEPROM.read(lockTimeAddress + 2) << 16;
+    savedLockTimestamp |= (long)EEPROM.read(lockTimeAddress + 3) << 24;
+
+    DateTime savedLockTime(savedLockTimestamp);
+
+    // Calculate the time difference between now and when the box was locked
+    DateTime now = rtc.now();
+    long elapsedSeconds = now.unixtime() - savedLockTime.unixtime(); // Elapsed time in seconds
+
+    // Adjust remaining time based on the elapsed time
+    if (remainingTime > 0) {
+      remainingTime -= elapsedSeconds / 60;  // Convert elapsed seconds to minutes
+    }
+
+    // If remaining time is less than or equal to 0, unlock the box
+    if (remainingTime <= 0) {
+      unlockBox();
+    }
+  } else {
+    lockServo.write(0);  // Unlock the box if it wasn't locked before
+  }
 
   Serial.println("Timer Box Ready!");
 }
 
 void loop() {
-  static unsigned long lastRefresh = 0;
-  static unsigned long lastSecond = 0;
-  static bool dotState = false;
+  static unsigned long lastSecond = 0;    // For blinking dot every second
+  static unsigned long lastMinute = 0;    // For decrementing time every minute
+  static unsigned long elapsedTime = 0;   // Track elapsed time in milliseconds
+  static bool dotState = false;           // To toggle the dot every second
 
   // Handle switch debouncing
   bool currentSwitch = digitalRead(switchPin) == LOW; // LOW means pressed
@@ -103,39 +144,34 @@ void loop() {
   }
   lastSwitchState = currentSwitch;
 
-  // Handle Serial Input for Lock Time
-  
-  if (Serial.available() > 0) {
-    int input = Serial.parseInt(); // Read number
-    if (input >= 1 && input <= 99) {
-      lockTime = input;
-      Serial.print("Lock time set to: ");
-      Serial.print(lockTime);
-      Serial.println(" minutes");
-    } else {
-      Serial.println("Invalid input. Please enter a value between 1 and 99.");
-    }
-    // Clear the buffer to handle extra characters like \n or \r
-    while (Serial.available()) Serial.read();
-  }
-
   // Update Time and Display
   if (boxLocked) {
-    if (millis() - lastSecond >= 1000) { // Every second
-      lastSecond = millis();
-      remainingTime--;
-      dotState = !dotState; // Toggle dot
-      digitalWrite(dotPin, dotState);
+    // Handle blinking of the dot every second (1000 milliseconds)
+    if (millis() - lastSecond >= 1000) { 
+      lastSecond = millis(); // Update the lastSecond timestamp
+      dotState = !dotState;   // Toggle the dot state (on/off)
+      digitalWrite(dotPin, dotState);  // Update dot pin
+      
+      // If it's been a minute, decrement the remaining time
+      if (millis() - lastMinute >= 60000) { // Every 60 seconds
+        lastMinute = millis();  // Reset the minute timer
+        remainingTime--;        // Decrease remaining time by 1 minute
 
-      if (remainingTime <= 0) {
-        unlockBox();
-        Serial.println("Box unlocked!");
+        // Save the updated remaining time to EEPROM
+        EEPROM.write(remainingTimeAddress, remainingTime);
+
+        if (remainingTime <= 0) {
+          unlockBox();
+          Serial.println("Box unlocked!");
+        }
       }
     }
+
+    // Refresh the 7-segment display with the remaining time
     refreshDisplay(remainingTime);
   } else {
     refreshDisplay(0); // Display 0 when unlocked
-    digitalWrite(dotPin, LOW); // Turn off dot
+    digitalWrite(dotPin, LOW); // Turn off dot when unlocked
   }
 }
 
@@ -143,12 +179,25 @@ void loop() {
 void lockBox() {
   boxLocked = true;
   lockServo.write(90); // Rotate servo to lock position
+  EEPROM.write(lockStateAddress, 1);  // Save lock state (locked)
+  
+  // Save the current RTC time when locked
+  DateTime now = rtc.now();
+  long lockTimestamp = now.unixtime(); // Get Unix timestamp (seconds since 1970)
+  
+  // Store timestamp in EEPROM (split into four bytes)
+  EEPROM.write(lockTimeAddress, lockTimestamp & 0xFF);        // Low byte
+  EEPROM.write(lockTimeAddress + 1, (lockTimestamp >> 8) & 0xFF);   // 2nd byte
+  EEPROM.write(lockTimeAddress + 2, (lockTimestamp >> 16) & 0xFF);  // 3rd byte
+  EEPROM.write(lockTimeAddress + 3, (lockTimestamp >> 24) & 0xFF);  // High byte
 }
 
 // Function to unlock the box
 void unlockBox() {
   boxLocked = false;
   lockServo.write(0); // Rotate servo to unlock position
+  EEPROM.write(lockStateAddress, 0);  // Save lock state (unlocked)
+  EEPROM.write(remainingTimeAddress, 0);  // Reset remaining time to 0
 }
 
 // Function to refresh the 7-segment display
