@@ -1,10 +1,8 @@
 /*
  * Timer Box Code
- * Version: 2.1
- * Created: 2024-12-05
+ * Version: 2.11
+ * Created: 241209
  * Author: ChatGPT
- * Prompt Engineer: X3msnake
- * Repo: https://github.com/X3msnake/lockandlearn-timer-box
  * 
  * Features:
  * - Two 7-segment displays to show remaining time (in minutes).
@@ -32,7 +30,7 @@ const int defaultLockTime = 15;                    // Default lock time in minut
 int lockTime = defaultLockTime;                    // Current lock time
 int remainingTime = 0;                             // Time left in minutes
 bool boxLocked = false;                            // Box lock state
-bool switchState = false;                          // Current state of the switch
+bool switchState = true;                           // Current state of the switch
 bool lastSwitchState = false;                      // Previous state of the switch
 unsigned long lastDebounceTime = 0;                // Last time the switch state changed
 const unsigned long debounceDelay = 50;            // Debounce delay in milliseconds
@@ -106,8 +104,9 @@ void loop() {
   lastSwitchState = currentSwitch;
 
   // Handle Serial Input for Lock Time
+  
   if (Serial.available() > 0) {
-    int input = Serial.parseInt();
+    int input = Serial.parseInt(); // Read number
     if (input >= 1 && input <= 99) {
       lockTime = input;
       Serial.print("Lock time set to: ");
@@ -116,6 +115,8 @@ void loop() {
     } else {
       Serial.println("Invalid input. Please enter a value between 1 and 99.");
     }
+    // Clear the buffer to handle extra characters like \n or \r
+    while (Serial.available()) Serial.read();
   }
 
   // Update Time and Display
