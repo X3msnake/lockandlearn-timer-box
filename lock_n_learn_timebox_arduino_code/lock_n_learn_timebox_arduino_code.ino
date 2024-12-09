@@ -1,6 +1,6 @@
 /*
  * Timer Box Code
- * Version: 2.11
+ * Version: 2.12
  * Created: 241209
  * Author: ChatGPT
  * 
@@ -33,7 +33,7 @@ bool boxLocked = false;                            // Box lock state
 bool switchState = true;                           // Current state of the switch
 bool lastSwitchState = false;                      // Previous state of the switch
 unsigned long lastDebounceTime = 0;                // Last time the switch state changed
-const unsigned long debounceDelay = 50;            // Debounce delay in milliseconds
+const unsigned long debounceDelay = 1000;          // Debounce delay in milliseconds
 RTC_DS1307 rtc;                                    // Real Time Clock
 Servo lockServo;
 
@@ -141,7 +141,6 @@ void loop() {
 
 // Function to lock the box
 void lockBox() {
-  delay(800);
   boxLocked = true;
   lockServo.write(90); // Rotate servo to lock position
 }
